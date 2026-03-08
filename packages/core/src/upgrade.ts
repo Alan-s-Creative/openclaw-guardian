@@ -40,12 +40,12 @@ export interface UpgradeResult {
   error?: string
 }
 
-export interface RollbackOptions {
+export interface UpgradeRollbackOptions {
   targetVersion: string
   dryRun?: boolean
 }
 
-export interface RollbackResult {
+export interface UpgradeRollbackResult {
   targetVersion: string
   dryRun: boolean
   success?: boolean
@@ -249,7 +249,7 @@ export async function performUpgrade(options: UpgradeOptions = {}): Promise<Upgr
   }
 }
 
-export async function rollbackUpgrade(options: RollbackOptions): Promise<RollbackResult> {
+export async function rollbackUpgrade(options: UpgradeRollbackOptions): Promise<UpgradeRollbackResult> {
   if (options.dryRun) {
     return {
       targetVersion: options.targetVersion,
