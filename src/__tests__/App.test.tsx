@@ -15,4 +15,9 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByText(/Guardian/i)).toBeInTheDocument();
   });
+
+  it('renders status bar with port', () => {
+    render(<App />);
+    expect(screen.getByText(/Port/i)).toBeInTheDocument();
+  });
 });

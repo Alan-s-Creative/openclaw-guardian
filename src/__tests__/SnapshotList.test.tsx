@@ -33,8 +33,8 @@ describe('SnapshotList', () => {
 
   it('shows openclaw version for each snapshot', () => {
     render(<SnapshotList snapshots={mockSnapshots} onRestore={vi.fn()} />);
-    expect(screen.getByText('1.4.2')).toBeInTheDocument();
-    expect(screen.getByText('1.4.1')).toBeInTheDocument();
+    expect(screen.getByText('v1.4.2')).toBeInTheDocument();
+    expect(screen.getByText('v1.4.1')).toBeInTheDocument();
   });
 
   it('shows diff summary', () => {
