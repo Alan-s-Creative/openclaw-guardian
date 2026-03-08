@@ -261,7 +261,7 @@ fn llm_fix() -> Result<String, String> {
 
     // Call Gemini API (gemini-2.0-flash)
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={}",
         api_key
     );
 
