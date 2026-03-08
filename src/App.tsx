@@ -10,11 +10,13 @@ interface AppState {
   status: Status;
   configPath: string;
   snapshots: Snapshot[];
+  openclawVersion: string;
 }
 
 const initialState: AppState = {
   status: 'ok',
   configPath: '/Users/test/.openclaw/openclaw.json',
+  openclawVersion: 'unknown',
   snapshots: [
     {
       id: 'snap_001',
@@ -37,6 +39,7 @@ function App() {
   const [isFixing, setIsFixing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<Snapshot | null>(null);
+  const [openclawVersion, setOpenclawVersion] = useState(initialState.openclawVersion);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<Record<string, string> | null>(null);
 
@@ -57,6 +60,9 @@ function App() {
         }
         if (state.snapshots) {
           setSnapshots(state.snapshots);
+        }
+        if (state.openclawVersion) {
+          setOpenclawVersion(state.openclawVersion);
         }
       })
       .catch(() => {
@@ -138,11 +144,15 @@ function App() {
           configPath={configPath}
           snapshotCount={snapshots.length}
           isWatching={isWatching}
+          openclawVersion={openclawVersion}
           onWatch={handleWatch}
           onHistory={() => void invoke('open_history').catch(() => undefined)}
           onRestore={() => handleRestore(snapshots[0]?.id ?? '')}
           onFix={handleFix}
           onSettings={() => void handleSettings()}
+          onDashboard={() => void invoke('open_dashboard').catch(() => {
+            window.open('https://openclaw.ai/dashboard', '_blank');
+          })}
         />
       </header>
 

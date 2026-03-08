@@ -12,6 +12,7 @@ pub struct AppState {
     pub snapshots: Vec<SnapshotMeta>,
     pub watching: bool,
     pub port: u16,
+    pub openclaw_version: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -83,6 +84,14 @@ fn check_config_status() -> String {
     }
 }
 
+fn read_openclaw_version(config_path: &str) -> String {
+    fs::read_to_string(config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["meta"]["lastTouchedVersion"].as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 // ── Commands ──────────────────────────────────────────────
 
 #[tauri::command]
@@ -93,6 +102,7 @@ fn get_app_state() -> AppState {
         snapshots: load_snapshots(),
         watching: false,
         port: 7749,
+        openclaw_version: read_openclaw_version(&get_config_path()),
     }
 }
 
@@ -156,6 +166,11 @@ fn open_settings() -> serde_json::Value {
     })
 }
 
+#[tauri::command]
+fn open_dashboard() -> Result<(), String> {
+    open::that("https://openclaw.ai/dashboard").map_err(|e| e.to_string())
+}
+
 // ── Entry ─────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -168,6 +183,7 @@ pub fn run() {
             restore_snapshot,
             llm_fix,
             open_settings,
+            open_dashboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,11 +6,13 @@ interface TrayMenuProps {
   configPath: string;
   snapshotCount: number;
   isWatching: boolean;
+  openclawVersion?: string;
   onWatch: () => void;
   onHistory: () => void;
   onRestore: () => void;
   onFix: () => void;
   onSettings: () => void;
+  onDashboard?: () => void;
 }
 
 function truncatePath(path: string, maxLen = 30): string {
@@ -78,11 +80,13 @@ export function TrayMenu({
   configPath,
   snapshotCount,
   isWatching,
+  openclawVersion,
   onWatch,
   onHistory,
   onRestore,
   onFix,
   onSettings,
+  onDashboard,
 }: TrayMenuProps) {
   const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 
@@ -109,7 +113,7 @@ export function TrayMenu({
           <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.01em' }}>
             OpenClaw Guardian
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>v0.1.0</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>v{openclawVersion ?? 'unknown'}</div>
         </div>
       </div>
 
@@ -209,22 +213,42 @@ export function TrayMenu({
         </button>
       </div>
 
-      {/* Settings — full width */}
-      <button
-        type="button"
-        onClick={onSettings}
-        onMouseEnter={() => setHoveredBtn('settings')}
-        onMouseLeave={() => setHoveredBtn(null)}
-        style={{
-          ...hoverStyle('settings'),
-          flexDirection: 'row',
-          gap: 6,
-          padding: '8px 12px',
-        }}
-      >
-        <IconSettings />
-        Settings
-      </button>
+      {/* Settings + Dashboard — full width row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <button
+          type="button"
+          onClick={onSettings}
+          onMouseEnter={() => setHoveredBtn('settings')}
+          onMouseLeave={() => setHoveredBtn(null)}
+          style={{
+            ...hoverStyle('settings'),
+            flexDirection: 'row',
+            gap: 6,
+            padding: '8px 12px',
+          }}
+        >
+          <IconSettings />
+          Settings
+        </button>
+        <button
+          type="button"
+          onClick={onDashboard}
+          onMouseEnter={() => setHoveredBtn('dashboard')}
+          onMouseLeave={() => setHoveredBtn(null)}
+          style={{
+            ...hoverStyle('dashboard'),
+            flexDirection: 'row',
+            gap: 6,
+            padding: '8px 12px',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="8" r="6" />
+            <path d="M2 8h12M8 2a10 10 0 0 1 3 6 10 10 0 0 1-3 6 10 10 0 0 1-3-6 10 10 0 0 1 3-6z" />
+          </svg>
+          Dashboard
+        </button>
+      </div>
     </section>
   );
 }
