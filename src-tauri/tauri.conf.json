@@ -4,7 +4,7 @@
   "identifier": "ai.openclaw.guardian",
   "build": {
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5201",
     "frontendDist": "../dist"
   },
   "app": {

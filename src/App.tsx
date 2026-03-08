@@ -37,6 +37,8 @@ function App() {
   const [isFixing, setIsFixing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<Snapshot | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +94,16 @@ function App() {
       .catch(() => undefined);
   }, []);
 
+  const handleSettings = useCallback(async () => {
+    try {
+      const s = await invoke<Record<string, string>>('open_settings');
+      setSettings(s);
+      setShowSettings(true);
+    } catch {
+      setShowSettings(true); // show empty modal in browser mode
+    }
+  }, []);
+
   const handleFix = useCallback(() => {
     setIsFixing(true);
     void invoke('llm_fix')
@@ -130,7 +142,7 @@ function App() {
           onHistory={() => void invoke('open_history').catch(() => undefined)}
           onRestore={() => handleRestore(snapshots[0]?.id ?? '')}
           onFix={handleFix}
-          onSettings={() => void invoke('open_settings').catch(() => undefined)}
+          onSettings={() => void handleSettings()}
         />
       </header>
 
@@ -192,6 +204,41 @@ function App() {
           {isWatching ? 'Watching' : 'Idle'}
         </span>
       </footer>
+
+      {/* Settings modal */}
+      {showSettings && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+        }}>
+          <div style={{
+            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 24, width: 340, display: 'grid', gap: 12,
+          }}>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16 }}>Settings</h2>
+            {settings && Object.entries(settings).map(([k, v]) => (
+              <div key={k} style={{ display: 'grid', gap: 4 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{k}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', wordBreak: 'break-all',
+                  background: 'var(--bg-card)', padding: '4px 8px', borderRadius: 6 }}>{String(v)}</div>
+              </div>
+            ))}
+            {!settings && (
+              <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                Config: ~/.openclaw/openclaw.json<br/>
+                Storage: ~/.guardian/snapshots<br/>
+                Port: 7749
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowSettings(false)}
+              style={{ marginTop: 8, padding: '8px 16px', background: 'var(--accent)',
+                color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+            >Close</button>
+          </div>
+        </div>
+      )}
 
       {/* Confirm dialog */}
       {confirmRestore && (
