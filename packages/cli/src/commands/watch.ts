@@ -1,10 +1,12 @@
 import { Command } from 'commander'
 import {
+  createWatcher,
   detectPortConflict,
   findAvailablePort,
   GUARDIAN_DEFAULT_PORT,
 } from '@openclaw-guardian/core'
 import * as readline from 'node:readline'
+import { resolveConfigPathOrDefault } from './runtime.js'
 
 interface WatchOptions {
   port: string
@@ -98,9 +100,24 @@ export function watchCmd() {
         return
       }
 
+      const configPath = await resolveConfigPathOrDefault()
       console.log(`Watching config on port ${finalPort}...`)
-      console.log(`Config: ${process.env.GUARDIAN_CONFIG_PATH ?? '~/.openclaw/openclaw.json'}`)
+      console.log(`Config: ${configPath}`)
 
-      // TODO: start actual daemon + HTTP health server in ALA-413 iteration
+      const watcher = createWatcher({ paths: [configPath] })
+
+      watcher.on('change', (filePath) => {
+        console.log(`[change] ${filePath}`)
+      })
+      watcher.on('corrupt', (filePath) => {
+        console.log(`[corrupt] ${filePath}`)
+      })
+      watcher.on('missing', (filePath) => {
+        console.log(`[missing] ${filePath}`)
+      })
+
+      await watcher.start()
+
+      // TODO: start HTTP health server in ALA-413 iteration
     })
 }

@@ -29,8 +29,10 @@ export function historyCmd() {
       }
 
       for (const snapshot of snapshots) {
+        const triggerStr = typeof snapshot.trigger === 'string' ? snapshot.trigger : JSON.stringify(snapshot.trigger)
+        const versionStr = snapshot.openclawVersion ?? 'unknown'
         console.log(
-          `${snapshot.id}  ${snapshot.timestamp}  ${snapshot.trigger}  ${snapshot.openclawVersion}`,
+          `${snapshot.id}  ${snapshot.timestamp}  ${triggerStr}  ${versionStr}`,
         )
       }
     })

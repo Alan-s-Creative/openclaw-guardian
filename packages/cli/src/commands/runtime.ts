@@ -46,31 +46,39 @@ function getFallbackCandidates(): string[] {
 
 async function readSnapshotsFromStorage(storageDir: string): Promise<SnapshotRecord[]> {
   const indexPath = path.join(storageDir, 'index.json')
-  let ids: string[] = []
   try {
     const raw = await readFile(indexPath, 'utf-8')
-    const parsed = JSON.parse(raw) as { ids?: unknown }
-    if (Array.isArray(parsed.ids)) {
-      ids = parsed.ids.filter((id): id is string => typeof id === 'string')
+    const parsed = JSON.parse(raw) as unknown
+
+    // Support both formats: array of objects or { ids: string[] }
+    if (Array.isArray(parsed)) {
+      return (parsed as SnapshotRecord[])
+        .filter((r): r is SnapshotRecord => r !== null && typeof r === 'object' && 'id' in r)
+        .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     }
+
+    const obj = parsed as { ids?: unknown }
+    const ids = Array.isArray(obj.ids)
+      ? obj.ids.filter((id): id is string => typeof id === 'string')
+      : []
+
+    const records = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const raw = await readFile(path.join(storageDir, `${id}.json`), 'utf-8')
+          return JSON.parse(raw) as SnapshotRecord
+        } catch {
+          return null
+        }
+      }),
+    )
+
+    return records
+      .filter((record): record is SnapshotRecord => record !== null)
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
   } catch {
     return []
   }
-
-  const records = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        const raw = await readFile(path.join(storageDir, `${id}.json`), 'utf-8')
-        return JSON.parse(raw) as SnapshotRecord
-      } catch {
-        return null
-      }
-    }),
-  )
-
-  return records
-    .filter((record): record is SnapshotRecord => record !== null)
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
 }
 
 function createFallbackStore(storageDir: string, configPath: string): SnapshotStoreLike {

@@ -65,8 +65,9 @@ function App() {
           setOpenclawVersion(state.openclawVersion);
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         // In tests and browser-only mode Tauri runtime may be unavailable.
+        console.warn('[Guardian] get_app_state unavailable:', err);
       });
 
     return () => {
@@ -97,7 +98,10 @@ function App() {
   const handleWatch = useCallback(() => {
     void invoke('start_watch')
       .then(() => setIsWatching((prev) => !prev))
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        console.error('[Guardian] start_watch failed:', err);
+        setToast({ message: 'Failed to toggle watcher', type: 'error' });
+      });
   }, []);
 
   const handleSettings = useCallback(async () => {
@@ -146,7 +150,9 @@ function App() {
           isWatching={isWatching}
           openclawVersion={openclawVersion}
           onWatch={handleWatch}
-          onHistory={() => void invoke('open_history').catch(() => undefined)}
+          onHistory={() => void invoke('open_history').catch((err: unknown) => {
+            console.error('[Guardian] open_history failed:', err);
+          })}
           onRestore={() => handleRestore(snapshots[0]?.id ?? '')}
           onFix={handleFix}
           onSettings={() => void handleSettings()}
