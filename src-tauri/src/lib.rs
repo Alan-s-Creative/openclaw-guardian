@@ -261,7 +261,7 @@ fn llm_fix() -> Result<String, String> {
 
     // Call Gemini API (gemini-2.0-flash)
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={}",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}",
         api_key
     );
 
@@ -276,7 +276,7 @@ fn llm_fix() -> Result<String, String> {
     });
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(45))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 
