@@ -216,19 +216,92 @@ fn restore_snapshot(snapshot_id: String) -> Result<String, String> {
     Ok(format!("Restored from {snapshot_id}"))
 }
 
+fn get_gemini_api_key() -> Option<String> {
+    // 1. Check environment variable first
+    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+    // 2. Read from openclaw config env.GEMINI_API_KEY
+    let config_path = get_config_path();
+    let content = fs::read_to_string(&config_path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    v["env"]["GEMINI_API_KEY"].as_str().map(|s| s.to_string())
+}
+
 #[tauri::command]
 fn llm_fix() -> Result<String, String> {
-    // Diagnose current config and suggest fix
     let path = get_config_path();
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Cannot read config: {e}"))?;
 
-    match serde_json::from_str::<serde_json::Value>(&content) {
-        Ok(_) => Ok("Config is valid JSON — no fix needed.".to_string()),
-        Err(e) => Err(format!(
-            "Config parse error at {e}. Use 'Restore' to recover from a snapshot."
-        )),
+    // Local JSON validation first
+    let parse_result = serde_json::from_str::<serde_json::Value>(&content);
+
+    // Get API key
+    let api_key = get_gemini_api_key()
+        .ok_or_else(|| "No Gemini API key found. Set GEMINI_API_KEY env var or add env.GEMINI_API_KEY in openclaw config.".to_string())?;
+
+    // Build prompt
+    let is_valid_json = parse_result.is_ok();
+    let prompt = if is_valid_json {
+        format!(
+            "You are an OpenClaw config validator. Analyze this openclaw.json config for issues, misconfigurations, or security concerns. Be concise (max 3 bullet points). Config:\n\n```json\n{}\n```",
+            &content[..content.len().min(3000)]
+        )
+    } else {
+        let err = parse_result.unwrap_err();
+        format!(
+            "This openclaw.json config has a JSON syntax error: {}. Here is the broken content:\n\n{}\n\nExplain what's wrong and how to fix it in 2-3 sentences.",
+            err,
+            &content[..content.len().min(1000)]
+        )
+    };
+
+    // Call Gemini API (gemini-2.0-flash)
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
+        api_key
+    );
+
+    let body = serde_json::json!({
+        "contents": [{
+            "parts": [{ "text": prompt }]
+        }],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 512
+        }
+    });
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Gemini API error: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        return Err(format!("Gemini API returned {status}: {text}"));
     }
+
+    let json: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("Failed to parse Gemini response: {e}"))?;
+
+    let text = json["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .unwrap_or("No response from Gemini")
+        .to_string();
+
+    Ok(text)
 }
 
 #[tauri::command]

@@ -31,6 +31,8 @@ function App() {
   const [isWatching, setIsWatching] = useState(initialState.watching);
   const [port, setPort] = useState(initialState.port);
   const [isFixing, setIsFixing] = useState(false);
+  const [llmResult, setLlmResult] = useState<string | null>(null);
+  const [llmLoading, setLlmLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<Snapshot | null>(null);
   const [openclawVersion, setOpenclawVersion] = useState(initialState.openclawVersion);
@@ -116,14 +118,19 @@ function App() {
 
   const handleFix = useCallback(() => {
     setIsFixing(true);
-    void invoke('llm_fix')
-      .then(() => {
-        setToast({ message: 'LLM Fix applied successfully', type: 'success' });
+    setLlmLoading(true);
+    setLlmResult(null);
+    void invoke<string>('llm_fix')
+      .then((result) => {
+        setLlmResult(result);
       })
-      .catch(() => {
-        setToast({ message: 'LLM Fix failed', type: 'error' });
+      .catch((err) => {
+        setLlmResult(`Error: ${String(err)}`);
       })
-      .finally(() => setIsFixing(false));
+      .finally(() => {
+        setLlmLoading(false);
+        setIsFixing(false);
+      });
   }, []);
 
   return (
@@ -220,6 +227,38 @@ function App() {
           {isWatching ? 'Watching' : 'Idle'}
         </span>
       </footer>
+
+      {/* LLM Fix result modal */}
+      {(llmResult !== null || llmLoading) && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+        }}>
+          <div style={{
+            background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 24, width: 380, display: 'grid', gap: 12,
+          }}>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16 }}>Gemini Analysis</h2>
+            {llmLoading
+              ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Analyzing config...</div>
+              : <div style={{
+                  color: 'var(--text-primary)', fontSize: 13, lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto',
+                }}>{llmResult}</div>
+            }
+            {!llmLoading && (
+              <button
+                type="button"
+                onClick={() => setLlmResult(null)}
+                style={{
+                  padding: '8px 16px', background: 'var(--accent)', color: '#fff',
+                  border: 'none', borderRadius: 6, cursor: 'pointer',
+                }}
+              >Close</button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Settings modal */}
       {showSettings && (
