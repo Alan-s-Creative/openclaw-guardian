@@ -1,0 +1,19 @@
+{
+  "productName": "OpenClaw Guardian",
+  "version": "0.1.0",
+  "identifier": "ai.openclaw.guardian",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenClaw Guardian",
+        "width": 400,
+        "height": 600
+      }
+    ]
+  }
+}

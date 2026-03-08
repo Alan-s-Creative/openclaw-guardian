@@ -1,0 +1,12 @@
+{
+  "name": "openclaw-guardian",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint packages/*/src/**/*.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.base.json"
+  }
+}
