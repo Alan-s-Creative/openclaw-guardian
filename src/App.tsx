@@ -10,32 +10,26 @@ interface AppState {
   status: Status;
   configPath: string;
   snapshots: Snapshot[];
+  watching: boolean;
+  port: number;
   openclawVersion: string;
 }
 
 const initialState: AppState = {
   status: 'ok',
-  configPath: '/Users/test/.openclaw/openclaw.json',
+  configPath: '',
   openclawVersion: 'unknown',
-  snapshots: [
-    {
-      id: 'snap_001',
-      timestamp: '2026-03-08T10:00:00Z',
-      openclawVersion: '1.4.2',
-      trigger: 'change',
-      diffSummary: 'Changed: model (sonnet→opus)',
-      configHash: 'sha256:abc',
-      diffPatch: '',
-      configSnapshot: {},
-    },
-  ],
+  snapshots: [],
+  watching: false,
+  port: 7749,
 };
 
 function App() {
   const [status, setStatus] = useState<Status>(initialState.status);
   const [configPath, setConfigPath] = useState(initialState.configPath);
   const [snapshots, setSnapshots] = useState<Snapshot[]>(initialState.snapshots);
-  const [isWatching, setIsWatching] = useState(false);
+  const [isWatching, setIsWatching] = useState(initialState.watching);
+  const [port, setPort] = useState(initialState.port);
   const [isFixing, setIsFixing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<Snapshot | null>(null);
@@ -60,6 +54,12 @@ function App() {
         }
         if (state.snapshots) {
           setSnapshots(state.snapshots);
+        }
+        if (typeof state.watching === 'boolean') {
+          setIsWatching(state.watching);
+        }
+        if (typeof state.port === 'number') {
+          setPort(state.port);
         }
         if (state.openclawVersion) {
           setOpenclawVersion(state.openclawVersion);
@@ -86,7 +86,7 @@ function App() {
     if (!confirmRestore) return;
     void invoke('restore_snapshot', { snapshotId: confirmRestore.id })
       .then(() => {
-        setToast({ message: `Restored to v${confirmRestore.openclawVersion}`, type: 'success' });
+        setToast({ message: `Restored to v${confirmRestore.openclawVersion ?? 'unknown'}`, type: 'success' });
       })
       .catch(() => {
         setStatus('warning');
@@ -97,10 +97,10 @@ function App() {
 
   const handleWatch = useCallback(() => {
     void invoke('start_watch')
-      .then(() => setIsWatching((prev) => !prev))
+      .then(() => setIsWatching(true))
       .catch((err: unknown) => {
         console.error('[Guardian] start_watch failed:', err);
-        setToast({ message: 'Failed to toggle watcher', type: 'error' });
+        setToast({ message: 'Failed to start watcher', type: 'error' });
       });
   }, []);
 
@@ -207,7 +207,7 @@ function App() {
           background: 'rgba(0,0,0,0.15)',
         }}
       >
-        <span>Port 3001</span>
+        <span>Port {port}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <span
             style={{
@@ -259,7 +259,7 @@ function App() {
       {/* Confirm dialog */}
       {confirmRestore && (
         <ConfirmDialog
-          message={`Restore to v${confirmRestore.openclawVersion} from ${new Date(confirmRestore.timestamp).toLocaleString()}?`}
+          message={`Restore to v${confirmRestore.openclawVersion ?? 'unknown'} from ${new Date(confirmRestore.timestamp).toLocaleString()}?`}
           onConfirm={executeRestore}
           onCancel={() => setConfirmRestore(null)}
         />

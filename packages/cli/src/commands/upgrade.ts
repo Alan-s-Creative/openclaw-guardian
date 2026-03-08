@@ -1,6 +1,21 @@
 import { Command } from 'commander'
-import { resolveConfigPathOrDefault } from './runtime.js'
-import { detectCurrentVersion } from './version-utils.js'
+import { loadCoreModule } from './runtime.js'
+
+interface UpgradeResult {
+  dryRun: boolean
+  checkOnly?: boolean
+  targetVersion?: string
+  previousVersion?: string
+  installed: boolean
+  updateAvailable?: boolean
+  error?: string
+}
+
+type PerformUpgradeFn = (options?: {
+  dryRun?: boolean
+  checkOnly?: boolean
+  force?: boolean
+}) => Promise<UpgradeResult>
 
 export function upgradeCmd() {
   return new Command('upgrade')
@@ -10,47 +25,78 @@ export function upgradeCmd() {
     .option('--dry-run', 'simulate upgrade without changes')
     .option('--json', 'output as JSON')
     .action(async (opts: { check?: boolean; force?: boolean; dryRun?: boolean; json?: boolean }) => {
-      const configPath = await resolveConfigPathOrDefault()
-      const currentVersion = await detectCurrentVersion(configPath)
-      const latestVersion = currentVersion === 'unknown' ? 'latest' : currentVersion
-      const result = {
-        currentVersion,
-        latestVersion,
-        upgraded: false,
-        dryRun: Boolean(opts.dryRun),
+      const core = await loadCoreModule()
+      const performUpgrade = core?.performUpgrade as PerformUpgradeFn | undefined
+
+      if (typeof performUpgrade !== 'function') {
+        console.error('Upgrade engine unavailable. Build @openclaw-guardian/core first.')
+        process.exitCode = 1
+        return
+      }
+
+      if (!opts.force && !opts.dryRun && !opts.check) {
+        console.error('Non-interactive mode requires --force, --check, or --dry-run.')
+        process.exitCode = 1
+        return
+      }
+
+      let result: UpgradeResult
+      try {
+        result = await performUpgrade({
+          checkOnly: Boolean(opts.check),
+          dryRun: Boolean(opts.dryRun),
+          force: Boolean(opts.force),
+        })
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : 'Upgrade failed.')
+        process.exitCode = 1
+        return
+      }
+
+      const output = {
+        currentVersion: result.previousVersion ?? 'unknown',
+        latestVersion: result.targetVersion ?? 'unknown',
+        upgraded: result.installed,
+        dryRun: result.dryRun,
+        checkOnly: Boolean(result.checkOnly),
+        updateAvailable: result.updateAvailable ?? false,
+        error: result.error,
       }
 
       if (opts.check) {
         if (opts.json) {
-          console.log(JSON.stringify(result, null, 2))
+          console.log(JSON.stringify(output, null, 2))
         } else {
-          console.log(`Current: ${currentVersion}`)
-          console.log(`Latest: ${latestVersion}`)
+          console.log(`Current: ${output.currentVersion}`)
+          console.log(`Latest: ${output.latestVersion}`)
+          console.log(`Update available: ${output.updateAvailable}`)
         }
         return
       }
 
       if (opts.dryRun) {
-        result.upgraded = true
         if (opts.json) {
-          console.log(JSON.stringify(result, null, 2))
+          console.log(JSON.stringify(output, null, 2))
         } else {
-          console.log(`Dry-run: would upgrade ${currentVersion} -> ${latestVersion}`)
+          console.log(`Dry-run: would upgrade ${output.currentVersion} -> ${output.latestVersion}`)
         }
         return
       }
 
-      if (!opts.force) {
-        console.error('Non-interactive mode requires --force or --dry-run.')
+      if (result.error) {
+        if (opts.json) {
+          console.log(JSON.stringify(output, null, 2))
+        } else {
+          console.error(result.error)
+        }
         process.exitCode = 1
         return
       }
 
-      result.upgraded = true
       if (opts.json) {
-        console.log(JSON.stringify(result, null, 2))
+        console.log(JSON.stringify(output, null, 2))
       } else {
-        console.log(`Upgraded OpenClaw ${currentVersion} -> ${latestVersion} (skeleton flow).`)
+        console.log(`Upgraded OpenClaw ${output.currentVersion} -> ${output.latestVersion}.`)
       }
     })
 }

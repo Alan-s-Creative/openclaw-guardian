@@ -34,8 +34,14 @@ interface StoredIndex {
   ids: string[]
 }
 
+const SNAPSHOT_ID_PATTERN = /^[A-Za-z0-9._-]+$/
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isValidSnapshotId(id: string): boolean {
+  return SNAPSHOT_ID_PATTERN.test(id)
 }
 
 function toStableJson(value: unknown): string {
@@ -119,7 +125,24 @@ export function createSnapshotStore(config: SnapshotStoreConfig): SnapshotStore 
   const { storageDir, configPath } = config
   const maxSnapshots = config.maxSnapshots ?? 20
   const indexPath = path.join(storageDir, 'index.json')
-  const snapshotPath = (id: string): string => path.join(storageDir, `${id}.json`)
+  let writeQueue = Promise.resolve()
+
+  const snapshotPath = (id: string): string => {
+    if (!isValidSnapshotId(id)) {
+      throw new Error(`Invalid snapshot id: ${id}`)
+    }
+
+    return path.join(storageDir, `${id}.json`)
+  }
+
+  const runExclusive = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const run = writeQueue.then(operation, operation)
+    writeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
 
   const ensureStorage = async (): Promise<void> => {
     await fs.mkdir(storageDir, { recursive: true })
@@ -183,41 +206,43 @@ export function createSnapshotStore(config: SnapshotStoreConfig): SnapshotStore 
 
   return {
     create: async (trigger: SnapshotTrigger): Promise<Snapshot> => {
-      const { raw, parsed } = await readCurrentConfig()
-      const previous = await getLatestSnapshot()
-      const id = `snap_${Date.now()}_${randomUUID().slice(0, 8)}`
-      const timestamp = new Date().toISOString()
-      const configHash = `sha256:${createHash('sha256').update(raw).digest('hex')}`
-      const openclawVersion = await detectOpenClawVersion(configPath)
-      const diffPatch = previous
-        ? createUnifiedDiff(previous.configSnapshot, parsed, previous.id, id)
-        : ''
-      const diffSummary = previous ? summarizeDiff(previous.configSnapshot, parsed) : 'First snapshot'
+      return runExclusive(async () => {
+        const { raw, parsed } = await readCurrentConfig()
+        const previous = await getLatestSnapshot()
+        const id = `snap_${Date.now()}_${randomUUID().slice(0, 8)}`
+        const timestamp = new Date().toISOString()
+        const configHash = `sha256:${createHash('sha256').update(raw).digest('hex')}`
+        const openclawVersion = await detectOpenClawVersion(configPath)
+        const diffPatch = previous
+          ? createUnifiedDiff(previous.configSnapshot, parsed, previous.id, id)
+          : ''
+        const diffSummary = previous ? summarizeDiff(previous.configSnapshot, parsed) : 'First snapshot'
 
-      const snapshot: Snapshot = {
-        id,
-        timestamp,
-        openclawVersion,
-        trigger,
-        configHash,
-        diffSummary,
-        diffPatch,
-        configSnapshot: parsed,
-      }
-
-      await writeSnapshot(snapshot)
-
-      const index = await readIndex()
-      index.ids.push(id)
-      while (index.ids.length > maxSnapshots) {
-        const removedId = index.ids.shift()
-        if (removedId) {
-          await removeSnapshotFile(removedId)
+        const snapshot: Snapshot = {
+          id,
+          timestamp,
+          openclawVersion,
+          trigger,
+          configHash,
+          diffSummary,
+          diffPatch,
+          configSnapshot: parsed,
         }
-      }
-      await writeIndex(index)
 
-      return snapshot
+        await writeSnapshot(snapshot)
+
+        const index = await readIndex()
+        index.ids.push(id)
+        while (index.ids.length > maxSnapshots) {
+          const removedId = index.ids.shift()
+          if (removedId) {
+            await removeSnapshotFile(removedId)
+          }
+        }
+        await writeIndex(index)
+
+        return snapshot
+      })
     },
 
     list: async (): Promise<Snapshot[]> => {

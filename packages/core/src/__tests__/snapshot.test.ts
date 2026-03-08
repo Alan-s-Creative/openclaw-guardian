@@ -79,4 +79,21 @@ describe('SnapshotStore', () => {
     const snap2 = await store.create('change')
     expect(snap2.diffSummary.length).toBeGreaterThan(0)
   })
+
+  it('serializes concurrent snapshot creation without losing index entries', async () => {
+    fs.writeFileSync(configPath, JSON.stringify({ version: '1.0', plugins: { firecrawl: true } }))
+
+    const [first, second] = await Promise.all([
+      store.create('manual'),
+      store.create('change'),
+    ])
+
+    const list = await store.list()
+    expect(list).toHaveLength(2)
+    expect(list.map((snapshot) => snapshot.id)).toEqual(expect.arrayContaining([first.id, second.id]))
+  })
+
+  it('rejects invalid snapshot ids during restore', async () => {
+    await expect(store.restore('../escape')).rejects.toThrow('Snapshot not found')
+  })
 })

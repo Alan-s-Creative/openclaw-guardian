@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ── State ─────────────────────────────────────────────────
 
@@ -26,6 +26,63 @@ pub struct SnapshotMeta {
     pub config_hash: String,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSnapshot {
+    id: String,
+    timestamp: String,
+    #[serde(default = "default_unknown")]
+    openclaw_version: String,
+    #[serde(default = "default_manual")]
+    trigger: String,
+    #[serde(default)]
+    diff_summary: String,
+    #[serde(default)]
+    config_hash: String,
+    config_snapshot: Option<serde_json::Value>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum StoredIndex {
+    SnapshotList(Vec<StoredSnapshot>),
+    SnapshotIds { ids: Vec<String> },
+}
+
+fn default_unknown() -> String {
+    "unknown".to_string()
+}
+
+fn default_manual() -> String {
+    "manual".to_string()
+}
+
+fn is_valid_snapshot_id(snapshot_id: &str) -> bool {
+    snapshot_id.starts_with("snap_")
+        && snapshot_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn snapshot_file_for_id(storage_dir: &Path, snapshot_id: &str) -> Result<PathBuf, String> {
+    if !is_valid_snapshot_id(snapshot_id) {
+        return Err("Invalid snapshot id".to_string());
+    }
+
+    Ok(storage_dir.join(format!("{snapshot_id}.json")))
+}
+
+fn snapshot_meta_from_stored(snapshot: StoredSnapshot) -> SnapshotMeta {
+    SnapshotMeta {
+        id: snapshot.id,
+        timestamp: snapshot.timestamp,
+        openclaw_version: snapshot.openclaw_version,
+        trigger: snapshot.trigger,
+        diff_summary: snapshot.diff_summary,
+        config_hash: snapshot.config_hash,
+    }
+}
+
 fn get_config_path() -> String {
     env::var("GUARDIAN_CONFIG_PATH").unwrap_or_else(|_| {
         let home = env::var("HOME").unwrap_or_default();
@@ -47,24 +104,27 @@ fn load_snapshots() -> Vec<SnapshotMeta> {
     if !index.exists() {
         return vec![];
     }
+
     let content = fs::read_to_string(&index).unwrap_or_default();
-    // Parse index.json: array of { id, timestamp, openclawVersion, trigger, diffSummary, configHash }
-    if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
-        arr.iter()
-            .filter_map(|v| {
-                Some(SnapshotMeta {
-                    id: v["id"].as_str()?.to_string(),
-                    timestamp: v["timestamp"].as_str().unwrap_or("").to_string(),
-                    openclaw_version: v["openclawVersion"].as_str().unwrap_or("unknown").to_string(),
-                    trigger: v["trigger"].as_str().unwrap_or("manual").to_string(),
-                    diff_summary: v["diffSummary"].as_str().unwrap_or("").to_string(),
-                    config_hash: v["configHash"].as_str().unwrap_or("").to_string(),
-                })
+    let mut snapshots = match serde_json::from_str::<StoredIndex>(&content) {
+        Ok(StoredIndex::SnapshotList(entries)) => entries
+            .into_iter()
+            .map(snapshot_meta_from_stored)
+            .collect(),
+        Ok(StoredIndex::SnapshotIds { ids }) => ids
+            .into_iter()
+            .filter_map(|snapshot_id| {
+                let snapshot_path = snapshot_file_for_id(&dir, &snapshot_id).ok()?;
+                let snapshot_content = fs::read_to_string(snapshot_path).ok()?;
+                let stored = serde_json::from_str::<StoredSnapshot>(&snapshot_content).ok()?;
+                Some(snapshot_meta_from_stored(stored))
             })
-            .collect()
-    } else {
-        vec![]
-    }
+            .collect(),
+        Err(_) => vec![],
+    };
+
+    snapshots.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    snapshots
 }
 
 fn check_config_status() -> String {
@@ -88,7 +148,12 @@ fn read_openclaw_version(config_path: &str) -> String {
     fs::read_to_string(config_path)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v["meta"]["lastTouchedVersion"].as_str().map(|s| s.to_string()))
+        .and_then(|v| {
+            v["version"]
+                .as_str()
+                .or_else(|| v["meta"]["lastTouchedVersion"].as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -120,21 +185,31 @@ fn open_history() -> Vec<SnapshotMeta> {
 #[tauri::command]
 fn restore_snapshot(snapshot_id: String) -> Result<String, String> {
     let dir = get_storage_dir();
-    let snap_file = dir.join(format!("{snapshot_id}.json"));
+    let snap_file = snapshot_file_for_id(&dir, &snapshot_id)?;
     if !snap_file.exists() {
         return Err(format!("Snapshot not found: {snapshot_id}"));
     }
 
     let content = fs::read_to_string(&snap_file).map_err(|e| e.to_string())?;
-    let snap: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    let config_snapshot = &snap["configSnapshot"];
-    let restored = serde_json::to_string_pretty(config_snapshot).map_err(|e| e.to_string())?;
+    let snap: StoredSnapshot = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let config_snapshot = snap
+        .config_snapshot
+        .ok_or_else(|| format!("Snapshot missing configSnapshot: {snapshot_id}"))?;
+    let restored = if let Some(raw) = config_snapshot.as_str() {
+        raw.to_string()
+    } else {
+        let mut pretty = serde_json::to_string_pretty(&config_snapshot).map_err(|e| e.to_string())?;
+        pretty.push('\n');
+        pretty
+    };
 
     let config_path = get_config_path();
 
     // Backup current before restore
     let bak = format!("{config_path}.bak");
-    let _ = fs::copy(&config_path, &bak);
+    if Path::new(&config_path).exists() {
+        let _ = fs::copy(&config_path, &bak);
+    }
 
     fs::write(&config_path, restored).map_err(|e| e.to_string())?;
 

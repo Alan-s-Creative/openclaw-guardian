@@ -5,12 +5,12 @@ import { DiffSummaryBadge } from './DiffSummaryBadge';
 export interface Snapshot {
   id: string;
   timestamp: string;
-  openclawVersion: string;
-  trigger: 'change' | 'manual' | 'startup';
+  openclawVersion?: string;
+  trigger: 'change' | 'corrupt' | 'manual' | 'pre-upgrade';
   diffSummary: string;
   configHash: string;
-  diffPatch: string;
-  configSnapshot: Record<string, unknown>;
+  diffPatch?: string;
+  configSnapshot?: unknown;
 }
 
 interface SnapshotListProps {
@@ -20,8 +20,9 @@ interface SnapshotListProps {
 
 const triggerStyles: Record<string, { bg: string; color: string }> = {
   change: { bg: 'rgba(124, 58, 237, 0.12)', color: '#a78bfa' },
+  corrupt: { bg: 'rgba(239, 68, 68, 0.12)', color: '#f87171' },
   manual: { bg: 'rgba(59, 130, 246, 0.12)', color: '#60a5fa' },
-  startup: { bg: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-secondary)' },
+  'pre-upgrade': { bg: 'rgba(245, 158, 11, 0.12)', color: '#fbbf24' },
 };
 
 export function SnapshotList({ snapshots, onRestore }: SnapshotListProps) {
@@ -126,7 +127,7 @@ export function SnapshotList({ snapshots, onRestore }: SnapshotListProps) {
                     color: 'var(--text-secondary)',
                   }}
                 >
-                  v{snapshot.openclawVersion}
+                  v{snapshot.openclawVersion ?? 'unknown'}
                 </span>
                 <span
                   style={{

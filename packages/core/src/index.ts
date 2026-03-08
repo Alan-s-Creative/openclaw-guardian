@@ -4,3 +4,4 @@ export * from './version.js';
 export * from './llm.js';
 export * from './versionManager.js';
 export * from './port.js';
+export * from './upgrade.js';

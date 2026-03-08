@@ -27,7 +27,7 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function loadCoreModule(): Promise<Record<string, unknown> | null> {
+export async function loadCoreModule(): Promise<Record<string, unknown> | null> {
   try {
     const specifier = CORE_MODULE
     return (await import(specifier)) as Record<string, unknown>
