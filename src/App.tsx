@@ -151,7 +151,7 @@ function App() {
           onFix={handleFix}
           onSettings={() => void handleSettings()}
           onDashboard={() => void invoke('open_dashboard').catch(() => {
-            window.open('https://openclaw.ai/dashboard', '_blank');
+            window.open('http://127.0.0.1:18789/', '_blank');
           })}
         />
       </header>

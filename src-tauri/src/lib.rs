@@ -168,7 +168,7 @@ fn open_settings() -> serde_json::Value {
 
 #[tauri::command]
 fn open_dashboard() -> Result<(), String> {
-    open::that("https://openclaw.ai/dashboard").map_err(|e| e.to_string())
+    open::that("http://127.0.0.1:18789/").map_err(|e| e.to_string())
 }
 
 // ── Entry ─────────────────────────────────────────────────
