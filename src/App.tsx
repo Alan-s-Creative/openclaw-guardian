@@ -13,16 +13,28 @@ interface AppState {
   watching: boolean;
   port: number;
   openclawVersion: string;
+  guardianVersion: string;
 }
 
 const initialState: AppState = {
   status: 'ok',
   configPath: '',
   openclawVersion: 'unknown',
+  guardianVersion: '0.1.1',
   snapshots: [],
   watching: false,
   port: 7749,
 };
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{label}</span>
+      <span style={{ fontSize: 12 }}>{value}</span>
+    </div>
+  );
+}
 
 function App() {
   const [status, setStatus] = useState<Status>(initialState.status);
@@ -36,8 +48,11 @@ function App() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<Snapshot | null>(null);
   const [openclawVersion, setOpenclawVersion] = useState(initialState.openclawVersion);
+  const [guardianVersion, setGuardianVersion] = useState(initialState.guardianVersion);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<Record<string, string> | null>(null);
+  const [healthResult, setHealthResult] = useState<any>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -65,6 +80,9 @@ function App() {
         }
         if (state.openclawVersion) {
           setOpenclawVersion(state.openclawVersion);
+        }
+        if (state.guardianVersion) {
+          setGuardianVersion(state.guardianVersion);
         }
       })
       .catch((err: unknown) => {
@@ -113,6 +131,18 @@ function App() {
       setShowSettings(true);
     } catch {
       setShowSettings(true); // show empty modal in browser mode
+    }
+  }, []);
+
+  const handleHealthCheck = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      const result = await invoke<any>('health_check');
+      setHealthResult(result);
+    } catch (err) {
+      setHealthResult({ error: String(err) });
+    } finally {
+      setHealthLoading(false);
     }
   }, []);
 
@@ -166,6 +196,8 @@ function App() {
           onDashboard={() => void invoke('open_dashboard').catch(() => {
             window.open('http://127.0.0.1:18789/', '_blank');
           })}
+          onHealthCheck={() => void handleHealthCheck()}
+          guardianVersion={guardianVersion}
         />
       </header>
 
@@ -270,6 +302,52 @@ function App() {
                   border: 'none', borderRadius: 6, cursor: 'pointer',
                 }}
               >Close</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Health Check modal */}
+      {(healthResult !== null || healthLoading) && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 24, width: 420,
+            display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '80vh', overflow: 'hidden' }}>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16, flexShrink: 0 }}>Gateway Health Check</h2>
+            {healthLoading
+              ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Checking...</div>
+              : healthResult && !healthResult.error ? (
+                <div style={{ overflowY: 'scroll', height: '340px', fontSize: 13, display: 'grid', gap: 8 }}>
+                  <Row label="Gateway" value={healthResult.gatewayReachable ? 'Reachable' : 'Unreachable'} />
+                  <Row label="Port 18789" value={healthResult.portListening ? 'Listening' : 'Not listening'} />
+                  <Row label="LaunchAgent" value={healthResult.launchAgentLoaded ? 'Loaded' : 'Not loaded'} />
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>Plugins:</div>
+                  {healthResult.pluginPathsOk.map((p: any) => (
+                    <div key={p.name} style={{ paddingLeft: 12, color: p.enabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                      {p.enabled ? (p.exists === false ? 'Missing' : 'OK') : 'Disabled'} {p.name}
+                      {p.exists === false && <span style={{ color: '#ff6b6b', marginLeft: 4 }}>(path not found)</span>}
+                    </div>
+                  ))}
+                  {healthResult.recentErrors.length > 0 && (
+                    <>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 4 }}>Recent errors:</div>
+                      {healthResult.recentErrors.map((e: string, i: number) => (
+                        <div key={i} style={{ color: '#ff6b6b', fontSize: 11, fontFamily: 'monospace',
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{e}</div>
+                      ))}
+                    </>
+                  )}
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>Checked at {healthResult.checkedAt}</div>
+                </div>
+              ) : (
+                <div style={{ color: '#ff6b6b', fontSize: 13 }}>{healthResult?.error}</div>
+              )
+            }
+            {!healthLoading && (
+              <button type="button" onClick={() => setHealthResult(null)}
+                style={{ padding: '8px 16px', background: 'var(--accent)', color: '#fff',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Close</button>
             )}
           </div>
         </div>

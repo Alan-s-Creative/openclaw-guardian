@@ -7,12 +7,14 @@ interface TrayMenuProps {
   snapshotCount: number;
   isWatching: boolean;
   openclawVersion?: string;
+  guardianVersion?: string;
   onWatch: () => void;
   onHistory: () => void;
   onRestore: () => void;
   onFix: () => void;
   onSettings: () => void;
   onDashboard?: () => void;
+  onHealthCheck?: () => void;
 }
 
 function truncatePath(path: string, maxLen = 30): string {
@@ -81,12 +83,14 @@ export function TrayMenu({
   snapshotCount,
   isWatching,
   openclawVersion,
+  guardianVersion,
   onWatch,
   onHistory,
   onRestore,
   onFix,
   onSettings,
   onDashboard,
+  onHealthCheck,
 }: TrayMenuProps) {
   const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 
@@ -113,7 +117,9 @@ export function TrayMenu({
           <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.01em' }}>
             OpenClaw Guardian
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>v{openclawVersion ?? 'unknown'}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+            Guardian v{guardianVersion ?? '0.1.1'} · OpenClaw {openclawVersion ?? 'unknown'}
+          </div>
         </div>
       </div>
 
@@ -210,6 +216,20 @@ export function TrayMenu({
         >
           <IconFix />
           LLM Fix
+        </button>
+
+        <button
+          type="button"
+          onClick={onHealthCheck}
+          onMouseEnter={() => setHoveredBtn('healthcheck')}
+          onMouseLeave={() => setHoveredBtn(null)}
+          style={hoverStyle('healthcheck')}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 8h2l1-3 2 6 1-3h2" />
+            <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+          </svg>
+          Health Check
         </button>
       </div>
 

@@ -15,6 +15,7 @@ pub struct AppState {
     pub watching: bool,
     pub port: u16,
     pub openclaw_version: String,
+    pub guardian_version: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -301,6 +302,7 @@ fn get_app_state() -> AppState {
         watching: false,
         port: 7749,
         openclaw_version: read_openclaw_version(&get_config_path()),
+        guardian_version: env!("CARGO_PKG_VERSION").to_string(),
     }
 }
 
