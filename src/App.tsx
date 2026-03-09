@@ -53,6 +53,11 @@ function App() {
   const [settings, setSettings] = useState<Record<string, string> | null>(null);
   const [healthResult, setHealthResult] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
+  const [versionList, setVersionList] = useState<any>(null);
+  const [versionLoading, setVersionLoading] = useState(false);
+  const [installingVersion, setInstallingVersion] = useState<string | null>(null);
+  const [installResult, setInstallResult] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -146,6 +151,41 @@ function App() {
     }
   }, []);
 
+  const handleOpenVersions = useCallback(async () => {
+    setShowVersions(true);
+    setVersionLoading(true);
+    setVersionList(null);
+    setInstallResult(null);
+    try {
+      const result = await invoke<any>('list_versions');
+      setVersionList(result);
+    } catch (err) {
+      setVersionList({ error: String(err) });
+    } finally {
+      setVersionLoading(false);
+    }
+  }, []);
+
+  const handleInstallVersion = useCallback(async (version: string) => {
+    setInstallingVersion(version);
+    setInstallResult(null);
+    try {
+      const result = await invoke<string>('install_version', { version });
+      setInstallResult(result);
+      // Refresh state after install
+      setTimeout(() => {
+        void invoke<Partial<AppState> | null>('get_app_state').then((s) => {
+          if (s?.openclawVersion) setOpenclawVersion(s.openclawVersion);
+          if (s?.snapshots) setSnapshots(s.snapshots);
+        });
+      }, 2000);
+    } catch (err) {
+      setInstallResult(`Error: ${String(err)}`);
+    } finally {
+      setInstallingVersion(null);
+    }
+  }, []);
+
   const handleFix = useCallback(() => {
     setIsFixing(true);
     setLlmLoading(true);
@@ -197,6 +237,7 @@ function App() {
             window.open('http://127.0.0.1:18789/', '_blank');
           })}
           onHealthCheck={() => void handleHealthCheck()}
+          onVersions={() => void handleOpenVersions()}
           guardianVersion={guardianVersion}
         />
       </header>
@@ -346,6 +387,98 @@ function App() {
             }
             {!healthLoading && (
               <button type="button" onClick={() => setHealthResult(null)}
+                style={{ padding: '8px 16px', background: 'var(--accent)', color: '#fff',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Close</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Version Manager modal */}
+      {showVersions && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 24, width: 440,
+            display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '85vh', overflow: 'hidden' }}>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16, flexShrink: 0 }}>
+              OpenClaw Versions
+            </h2>
+
+            {installResult && (
+              <div style={{
+                background: installResult.startsWith('Error') ? 'rgba(255,100,100,0.15)' : 'rgba(80,200,120,0.15)',
+                border: `1px solid ${installResult.startsWith('Error') ? '#ff6b6b' : '#50c878'}`,
+                borderRadius: 6, padding: '8px 12px', fontSize: 12, whiteSpace: 'pre-wrap',
+                color: installResult.startsWith('Error') ? '#ff6b6b' : '#50c878',
+              }}>
+                {installResult}
+              </div>
+            )}
+
+            {versionLoading ? (
+              <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Fetching versions from npm...</div>
+            ) : versionList?.error ? (
+              <div style={{ color: '#ff6b6b', fontSize: 13 }}>{versionList.error}</div>
+            ) : versionList ? (
+              <div style={{ overflowY: 'scroll', flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                  Current: <strong style={{ color: 'var(--text-primary)' }}>{versionList.current}</strong>
+                  {' '}&middot; Latest: <strong style={{ color: 'var(--accent)' }}>{versionList.latest}</strong>
+                </div>
+                {versionList.versions.map((v: any) => {
+                  const isCurrent = v.isCurrent;
+                  const isNewer = !isCurrent && v.version > versionList.current;
+                  const action = isCurrent ? 'Current' : isNewer ? 'Upgrade' : 'Downgrade';
+                  const actionColor = isCurrent ? 'var(--text-secondary)' : isNewer ? '#50c878' : '#f0a500';
+                  const isInstalling = installingVersion === v.version;
+
+                  return (
+                    <div key={v.version} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '7px 0', borderBottom: '1px solid var(--border)',
+                    }}>
+                      <div>
+                        <span style={{
+                          fontSize: 13, fontWeight: isCurrent ? 700 : 400,
+                          color: isCurrent ? 'var(--accent)' : 'var(--text-primary)',
+                        }}>
+                          {v.version}
+                          {v.isLatest && <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--accent)',
+                            color: '#fff', borderRadius: 4, padding: '1px 5px' }}>latest</span>}
+                          {isCurrent && <span style={{ marginLeft: 6, fontSize: 10, background: 'rgba(80,200,120,0.2)',
+                            color: '#50c878', borderRadius: 4, padding: '1px 5px' }}>installed</span>}
+                        </span>
+                        {v.publishedAt && (
+                          <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>{v.publishedAt}</div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 10, color: actionColor }}>{action}</span>
+                        {!isCurrent && (
+                          <button
+                            type="button"
+                            disabled={!!installingVersion}
+                            onClick={() => void handleInstallVersion(v.version)}
+                            style={{
+                              padding: '3px 10px', fontSize: 11, borderRadius: 4, border: 'none',
+                              background: isInstalling ? 'var(--text-secondary)' : 'var(--accent)',
+                              color: '#fff', cursor: installingVersion ? 'wait' : 'pointer',
+                              opacity: installingVersion && !isInstalling ? 0.5 : 1,
+                            }}
+                          >
+                            {isInstalling ? 'Installing...' : 'Install'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {!versionLoading && (
+              <button type="button" onClick={() => { setShowVersions(false); setInstallResult(null); }}
                 style={{ padding: '8px 16px', background: 'var(--accent)', color: '#fff',
                   border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Close</button>
             )}

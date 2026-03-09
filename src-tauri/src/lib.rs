@@ -291,6 +291,161 @@ fn health_check_sync() -> Result<HealthReport, String> {
     })
 }
 
+// ── Version Manager ──────────────────────────────────────
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct VersionItem {
+    version: String,
+    is_current: bool,
+    is_latest: bool,
+    published_at: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionList {
+    versions: Vec<VersionItem>,
+    current: String,
+    latest: String,
+}
+
+#[tauri::command]
+async fn list_versions() -> Result<VersionList, String> {
+    let config_path = get_config_path();
+    let current = if let Ok(content) = fs::read_to_string(&config_path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            v["meta"]["lastTouchedVersion"]
+                .as_str()
+                .or_else(|| v["version"].as_str())
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            "unknown".to_string()
+        }
+    } else {
+        "unknown".to_string()
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get("https://registry.npmjs.org/openclaw")
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("npm registry error: {e}"))?;
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {e}"))?;
+
+    let latest = json["dist-tags"]["latest"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    let versions: Vec<VersionItem> = json["versions"]
+        .as_object()
+        .map(|m| {
+            let mut vers: Vec<String> = m.keys().cloned().collect();
+            vers.sort_by(|a, b| {
+                let parse = |s: &str| -> Vec<u64> {
+                    s.split('.').filter_map(|x| x.parse().ok()).collect()
+                };
+                parse(b).cmp(&parse(a))
+            });
+            vers.into_iter()
+                .take(25)
+                .map(|v| {
+                    let published_at = json["time"][&v]
+                        .as_str()
+                        .map(|s| s[..s.len().min(10)].to_string());
+                    VersionItem {
+                        is_current: v == current,
+                        is_latest: v == latest,
+                        version: v,
+                        published_at,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(VersionList {
+        versions,
+        current,
+        latest,
+    })
+}
+
+#[tauri::command]
+async fn install_version(version: String) -> Result<String, String> {
+    // 1. Snapshot before switching
+    let config_path = get_config_path();
+    let storage_dir = get_storage_dir();
+
+    let content =
+        fs::read_to_string(&config_path).map_err(|e| format!("Cannot read config: {e}"))?;
+    let config: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid config JSON: {e}"))?;
+    let current_version = config["meta"]["lastTouchedVersion"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    let snapshot_id = format!(
+        "snap_{}_pre_switch",
+        chrono::Local::now().timestamp_millis()
+    );
+    let snapshot_path = storage_dir.join(format!("{snapshot_id}.json"));
+    let snapshot = serde_json::json!({
+        "id": snapshot_id,
+        "timestamp": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+        "config_snapshot": config,
+        "trigger": format!("pre-version-switch-to-{version}"),
+        "openclawVersion": current_version,
+    });
+
+    fs::create_dir_all(&storage_dir).ok();
+    fs::write(
+        &snapshot_path,
+        serde_json::to_string_pretty(&snapshot).unwrap(),
+    )
+    .map_err(|e| format!("Snapshot failed: {e}"))?;
+
+    // Update index.json
+    let index_path = storage_dir.join("index.json");
+    let mut ids: Vec<String> = if let Ok(data) = fs::read_to_string(&index_path) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    ids.insert(0, snapshot_id.clone());
+    ids.truncate(20);
+    fs::write(&index_path, serde_json::to_string(&ids).unwrap()).ok();
+
+    // 2. npm install -g openclaw@{version}
+    let output = tokio::process::Command::new("npm")
+        .args(["install", "-g", &format!("openclaw@{version}")])
+        .output()
+        .await
+        .map_err(|e| format!("npm install failed: {e}"))?;
+
+    if output.status.success() {
+        Ok(format!(
+            "Switched to openclaw@{version}\nPre-switch snapshot: {snapshot_id}"
+        ))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("npm install failed:\n{stderr}"))
+    }
+}
+
 // ── Commands ──────────────────────────────────────────────
 
 #[tauri::command]
@@ -470,6 +625,8 @@ pub fn run() {
             open_settings,
             open_dashboard,
             health_check,
+            list_versions,
+            install_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
