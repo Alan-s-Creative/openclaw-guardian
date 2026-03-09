@@ -1,6 +1,6 @@
 {
   "productName": "OpenClaw Guardian",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "ai.openclaw.guardian",
   "build": {
     "beforeBuildCommand": "npm run build",
