@@ -403,12 +403,42 @@ async fn install_version(version: String) -> Result<String, String> {
         chrono::Local::now().timestamp_millis()
     );
     let snapshot_path = storage_dir.join(format!("{snapshot_id}.json"));
+
+    // Read plugin list from config
+    let plugins: serde_json::Value = config
+        .get("plugins")
+        .cloned()
+        .unwrap_or(serde_json::json!([]));
+
+    // Get npm openclaw version
+    let npm_version = tokio::process::Command::new("npm")
+        .args(["list", "-g", "openclaw", "--json", "--depth=0"])
+        .output()
+        .await
+        .ok()
+        .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+        .and_then(|v| {
+            v["dependencies"]["openclaw"]["version"]
+                .as_str()
+                .map(String::from)
+        })
+        .unwrap_or_else(|| current_version.clone());
+
     let snapshot = serde_json::json!({
         "id": snapshot_id,
         "timestamp": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
         "config_snapshot": config,
         "trigger": format!("pre-version-switch-to-{version}"),
         "openclawVersion": current_version,
+        "targetVersion": version,
+        "previousNpmVersion": npm_version,
+        "plugins": plugins,
+        "nodeVersion": std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default(),
+        "platform": std::env::consts::OS,
     });
 
     fs::create_dir_all(&storage_dir).ok();
@@ -444,6 +474,97 @@ async fn install_version(version: String) -> Result<String, String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(format!("npm install failed:\n{stderr}"))
     }
+}
+
+// ── Release Notes ────────────────────────────────────────
+
+#[tauri::command]
+async fn get_release_notes(version: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("openclaw-guardian/0.1")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Try exact tag first, then with/without 'v' prefix
+    let tags = vec![
+        format!("v{}", version),
+        version.clone(),
+    ];
+
+    for tag in &tags {
+        let url = format!(
+            "https://api.github.com/repos/nicholasgasior/openclaw/releases/tags/{}",
+            tag
+        );
+        let resp = client
+            .get(&url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .send()
+            .await;
+
+        if let Ok(r) = resp {
+            if r.status().is_success() {
+                let json: serde_json::Value = r.json().await.map_err(|e| e.to_string())?;
+                let body = json["body"].as_str().unwrap_or("").trim().to_string();
+                let name = json["name"].as_str().unwrap_or(&version).to_string();
+                let published = json["published_at"]
+                    .as_str()
+                    .and_then(|s| s.get(..10))
+                    .unwrap_or("")
+                    .to_string();
+
+                if body.is_empty() {
+                    return Ok(format!(
+                        "**{}** ({})\n\nNo release notes available.",
+                        name, published
+                    ));
+                }
+                return Ok(format!("**{}** ({})\n\n{}", name, published, body));
+            }
+        }
+    }
+
+    // Fallback: list releases and find matching
+    let list_url =
+        "https://api.github.com/repos/nicholasgasior/openclaw/releases?per_page=50";
+    let resp = client
+        .get(list_url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("GitHub API error: {e}"))?;
+
+    let releases: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    if let Some(arr) = releases.as_array() {
+        for release in arr {
+            let tag = release["tag_name"].as_str().unwrap_or("");
+            let clean_tag = tag.trim_start_matches('v');
+            if clean_tag == version || tag == version {
+                let body = release["body"].as_str().unwrap_or("").trim().to_string();
+                let name = release["name"].as_str().unwrap_or(&version).to_string();
+                let published = release["published_at"]
+                    .as_str()
+                    .and_then(|s| s.get(..10))
+                    .unwrap_or("")
+                    .to_string();
+
+                return Ok(format!(
+                    "**{}** ({})\n\n{}",
+                    name,
+                    published,
+                    if body.is_empty() {
+                        "No release notes available.".to_string()
+                    } else {
+                        body
+                    }
+                ));
+            }
+        }
+    }
+
+    Ok(format!("No release notes found for version {}.", version))
 }
 
 // ── Commands ──────────────────────────────────────────────
@@ -611,6 +732,72 @@ fn open_dashboard() -> Result<(), String> {
     open::that("http://127.0.0.1:18789/").map_err(|e| e.to_string())
 }
 
+// ── Rollback ──────────────────────────────────────────────
+
+#[tauri::command]
+async fn rollback_version(snapshot_id: String) -> Result<String, String> {
+    let config_path = get_config_path();
+    let storage_dir = get_storage_dir();
+
+    // 1. Read snapshot
+    let snapshot_path = snapshot_file_for_id(&storage_dir, &snapshot_id)?;
+    let content = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("Snapshot not found: {e}"))?;
+    let snapshot: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Invalid snapshot: {e}"))?;
+
+    // 2. Restore openclaw.json
+    let config = snapshot
+        .get("config_snapshot")
+        .ok_or("Snapshot missing config")?;
+
+    // Backup current config
+    let bak = format!("{config_path}.bak");
+    if Path::new(&config_path).exists() {
+        let _ = fs::copy(&config_path, &bak);
+    }
+
+    fs::write(&config_path, serde_json::to_string_pretty(config).unwrap())
+        .map_err(|e| format!("Cannot restore config: {e}"))?;
+
+    // 3. Determine previous version to rollback to
+    let prev_version = snapshot["previousNpmVersion"]
+        .as_str()
+        .or_else(|| snapshot["openclawVersion"].as_str())
+        .unwrap_or("latest");
+
+    let mut steps: Vec<String> = vec![
+        format!("Config restored from snapshot `{}`", snapshot_id),
+    ];
+
+    // 4. npm install -g openclaw@{prevVersion}
+    if prev_version != "unknown" && prev_version != "latest" {
+        let output = tokio::process::Command::new("npm")
+            .args(["install", "-g", &format!("openclaw@{}", prev_version)])
+            .output()
+            .await
+            .map_err(|e| format!("npm install failed: {e}"))?;
+
+        if output.status.success() {
+            steps.push(format!("Reinstalled openclaw@{}", prev_version));
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            steps.push(format!(
+                "npm install openclaw@{} failed:\n{}",
+                prev_version,
+                &stderr[..stderr.len().min(200)]
+            ));
+        }
+    } else {
+        steps.push("Previous version unknown, skipped npm reinstall".to_string());
+    }
+
+    // 5. Suggest restart
+    steps.push("Please restart the OpenClaw gateway: `openclaw gateway restart`".to_string());
+
+    Ok(steps.join("\n"))
+}
+
 // ── Entry ─────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -621,12 +808,14 @@ pub fn run() {
             start_watch,
             open_history,
             restore_snapshot,
+            rollback_version,
             llm_fix,
             open_settings,
             open_dashboard,
             health_check,
             list_versions,
             install_version,
+            get_release_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

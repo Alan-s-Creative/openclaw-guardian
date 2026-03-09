@@ -58,6 +58,11 @@ function App() {
   const [versionLoading, setVersionLoading] = useState(false);
   const [installingVersion, setInstallingVersion] = useState<string | null>(null);
   const [installResult, setInstallResult] = useState<string | null>(null);
+  const [releaseNotes, setReleaseNotes] = useState<{ version: string; content: string } | null>(null);
+  const [releaseNotesLoading, setReleaseNotesLoading] = useState<string | null>(null);
+  const [rollbackResult, setRollbackResult] = useState<string | null>(null);
+  const [rollingBack, setRollingBack] = useState(false);
+  const [lastSnapshotId, setLastSnapshotId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -167,11 +172,16 @@ function App() {
   }, []);
 
   const handleInstallVersion = useCallback(async (version: string) => {
+    if (!confirm(`Switch to openclaw@${version}?\n\nA snapshot will be taken automatically before switching.`)) return;
     setInstallingVersion(version);
     setInstallResult(null);
+    setRollbackResult(null);
     try {
       const result = await invoke<string>('install_version', { version });
       setInstallResult(result);
+      // Parse snapshot ID from result
+      const match = result.match(/snap_\d+_pre_switch/);
+      if (match) setLastSnapshotId(match[0]);
       // Refresh state after install
       setTimeout(() => {
         void invoke<Partial<AppState> | null>('get_app_state').then((s) => {
@@ -183,6 +193,40 @@ function App() {
       setInstallResult(`Error: ${String(err)}`);
     } finally {
       setInstallingVersion(null);
+    }
+  }, []);
+
+  const handleRollback = useCallback(async (snapshotId: string) => {
+    if (!confirm('Rollback to previous version?\n\nThis will:\n1. Restore your config\n2. Reinstall the previous openclaw version\n\nContinue?')) return;
+    setRollingBack(true);
+    setRollbackResult(null);
+    try {
+      const result = await invoke<string>('rollback_version', { snapshotId });
+      setRollbackResult(result);
+      setLastSnapshotId(null);
+      // Refresh state after rollback
+      setTimeout(() => {
+        void invoke<Partial<AppState> | null>('get_app_state').then((s) => {
+          if (s?.openclawVersion) setOpenclawVersion(s.openclawVersion);
+          if (s?.snapshots) setSnapshots(s.snapshots);
+        });
+      }, 2000);
+    } catch (err) {
+      setRollbackResult(`Error: ${String(err)}`);
+    } finally {
+      setRollingBack(false);
+    }
+  }, []);
+
+  const handleReleaseNotes = useCallback(async (version: string) => {
+    setReleaseNotesLoading(version);
+    try {
+      const content = await invoke<string>('get_release_notes', { version });
+      setReleaseNotes({ version, content });
+    } catch (err) {
+      setReleaseNotes({ version, content: `Error: ${String(err)}` });
+    } finally {
+      setReleaseNotesLoading(null);
     }
   }, []);
 
@@ -416,6 +460,35 @@ function App() {
               </div>
             )}
 
+            {/* Rollback button — shown after successful install with snapshot ID */}
+            {installResult && lastSnapshotId && !installResult.startsWith('Error') && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <button
+                  type="button"
+                  disabled={rollingBack}
+                  onClick={() => void handleRollback(lastSnapshotId)}
+                  style={{
+                    padding: '6px 12px', fontSize: 12, borderRadius: 5, border: '1px solid #f0a500',
+                    cursor: rollingBack ? 'not-allowed' : 'pointer',
+                    background: 'rgba(240,165,0,0.12)', color: '#f0a500',
+                    opacity: rollingBack ? 0.5 : 1,
+                  }}
+                >{rollingBack ? '\u23F3 Rolling back...' : '\uD83D\uDD04 Rollback to Previous'}</button>
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Snapshot: {lastSnapshotId.slice(0, 20)}...</span>
+              </div>
+            )}
+
+            {/* Rollback result */}
+            {rollbackResult && (
+              <div style={{
+                background: rollbackResult.includes('Error') ? 'rgba(255,100,100,0.15)' : 'rgba(80,200,120,0.12)',
+                border: `1px solid ${rollbackResult.includes('Error') ? '#ff6b6b' : '#50c878'}`,
+                borderRadius: 6, padding: '8px 12px', fontSize: 11, whiteSpace: 'pre-wrap', flexShrink: 0,
+              }}>
+                {rollbackResult}
+              </div>
+            )}
+
             {versionLoading ? (
               <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Fetching versions from npm...</div>
             ) : versionList?.error ? (
@@ -453,7 +526,19 @@ function App() {
                           <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>{v.publishedAt}</div>
                         )}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => void handleReleaseNotes(v.version)}
+                          disabled={releaseNotesLoading === v.version}
+                          title="Release Notes"
+                          style={{
+                            padding: '4px 8px', fontSize: 11, borderRadius: 5, border: 'none',
+                            cursor: 'pointer', background: 'rgba(255,255,255,0.06)',
+                            color: 'var(--text-secondary)',
+                            opacity: releaseNotesLoading === v.version ? 0.5 : 1,
+                          }}
+                        >{releaseNotesLoading === v.version ? '\u23F3' : '\uD83D\uDCCB'}</button>
                         <span style={{ fontSize: 10, color: actionColor }}>{action}</span>
                         {!isCurrent && (
                           <button
@@ -478,10 +563,48 @@ function App() {
             ) : null}
 
             {!versionLoading && (
-              <button type="button" onClick={() => { setShowVersions(false); setInstallResult(null); }}
+              <button type="button" onClick={() => { setShowVersions(false); setInstallResult(null); setRollbackResult(null); setLastSnapshotId(null); }}
                 style={{ padding: '8px 16px', background: 'var(--accent)', color: '#fff',
                   border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Close</button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Release Notes modal */}
+      {releaseNotes && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+            borderRadius: 12, padding: 24, width: 460,
+            display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '80vh', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16 }}>
+                {'\uD83D\uDCCB'} Release Notes — {releaseNotes.version}
+              </h2>
+              <button type="button" onClick={() => setReleaseNotes(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)',
+                  cursor: 'pointer', fontSize: 18, padding: '0 4px' }}>{'\u2715'}</button>
+            </div>
+            <div
+              style={{
+                overflowY: 'scroll', flex: 1, fontSize: 12, lineHeight: 1.7,
+                color: 'var(--text-primary)', whiteSpace: 'pre-wrap',
+              }}
+              dangerouslySetInnerHTML={{
+                __html: releaseNotes.content
+                  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                  .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                  .replace(/^### (.+)$/gm, '<div style="color:var(--accent);font-weight:700;margin-top:8px">$1</div>')
+                  .replace(/^## (.+)$/gm, '<div style="color:var(--text-primary);font-size:13px;font-weight:700;margin-top:12px">$1</div>')
+                  .replace(/^- (.+)$/gm, '\u2022 $1')
+                  .replace(/\n/g, '<br/>')
+              }}
+            />
+            <button type="button" onClick={() => setReleaseNotes(null)}
+              style={{ padding: '8px 16px', background: 'var(--accent)', color: '#fff',
+                border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }}>Close</button>
           </div>
         </div>
       )}
