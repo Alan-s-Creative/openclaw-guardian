@@ -181,7 +181,13 @@ struct HealthReport {
 }
 
 #[tauri::command]
-fn health_check() -> Result<HealthReport, String> {
+async fn health_check() -> Result<HealthReport, String> {
+    tokio::task::spawn_blocking(health_check_sync)
+        .await
+        .map_err(|e| format!("Task join error: {e}"))?
+}
+
+fn health_check_sync() -> Result<HealthReport, String> {
     // 1. Port 18789 listening
     let port_listening = TcpStream::connect_timeout(
         &"127.0.0.1:18789".parse().unwrap(),
@@ -358,7 +364,7 @@ fn get_gemini_api_key() -> Option<String> {
 }
 
 #[tauri::command]
-fn llm_fix() -> Result<String, String> {
+async fn llm_fix() -> Result<String, String> {
     let path = get_config_path();
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Cannot read config: {e}"))?;
@@ -402,7 +408,7 @@ fn llm_fix() -> Result<String, String> {
         }
     });
 
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(45))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
@@ -411,16 +417,18 @@ fn llm_fix() -> Result<String, String> {
         .post(&url)
         .json(&body)
         .send()
+        .await
         .map_err(|e| format!("Gemini API error: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp.text().unwrap_or_default();
+        let text = resp.text().await.unwrap_or_default();
         return Err(format!("Gemini API returned {status}: {text}"));
     }
 
     let json: serde_json::Value = resp
         .json()
+        .await
         .map_err(|e| format!("Failed to parse Gemini response: {e}"))?;
 
     let text = json["candidates"][0]["content"]["parts"][0]["text"]

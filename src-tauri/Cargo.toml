@@ -18,3 +18,6 @@ open = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+tokio = { version = "1.38", features = ["rt"] }
+chrono = { version = "0.4", features = ["clock"] }
+dirs = "5"
