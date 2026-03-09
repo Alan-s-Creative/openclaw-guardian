@@ -271,7 +271,7 @@ fn llm_fix() -> Result<String, String> {
         }],
         "generationConfig": {
             "temperature": 0.3,
-            "maxOutputTokens": 512
+            "maxOutputTokens": 4096
         }
     });
 

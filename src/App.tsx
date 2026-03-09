@@ -236,15 +236,30 @@ function App() {
         }}>
           <div style={{
             background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-            borderRadius: 12, padding: 24, width: 380, display: 'grid', gap: 12,
+            borderRadius: 12, padding: 24, width: 420, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden',
           }}>
-            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16 }}>Gemini Analysis</h2>
+            <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 16, flexShrink: 0 }}>🤖 Gemini Analysis</h2>
             {llmLoading
-              ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Analyzing config...</div>
-              : <div style={{
-                  color: 'var(--text-primary)', fontSize: 13, lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto',
-                }}>{llmResult}</div>
+              ? <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>⏳ Analyzing config...</div>
+              : <div
+                  style={{
+                    color: 'var(--text-primary)', fontSize: 13, lineHeight: 1.7,
+                    overflowY: 'scroll',
+                    height: '320px',
+                    paddingRight: 8,
+                    WebkitOverflowScrolling: 'touch',
+                  } as React.CSSProperties}
+                  dangerouslySetInnerHTML={{
+                    __html: (llmResult ?? '')
+                      .replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                      .replace(/\n/g, '<br/>')
+                  }}
+                />
             }
             {!llmLoading && (
               <button
