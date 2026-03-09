@@ -1,6 +1,8 @@
 use std::env;
 use std::fs;
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 // ── State ─────────────────────────────────────────────────
 
@@ -155,6 +157,131 @@ fn read_openclaw_version(config_path: &str) -> String {
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+// ── Health Check ─────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginPathStatus {
+    name: String,
+    enabled: bool,
+    exists: Option<bool>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthReport {
+    gateway_reachable: bool,
+    port_listening: bool,
+    plugin_paths_ok: Vec<PluginPathStatus>,
+    launch_agent_loaded: bool,
+    recent_errors: Vec<String>,
+    checked_at: String,
+}
+
+#[tauri::command]
+fn health_check() -> Result<HealthReport, String> {
+    // 1. Port 18789 listening
+    let port_listening = TcpStream::connect_timeout(
+        &"127.0.0.1:18789".parse().unwrap(),
+        Duration::from_secs(2),
+    )
+    .is_ok();
+
+    // 2. Gateway HTTP reachable — if port is listening, gateway is reachable
+    // (reqwest blocking may conflict with Tauri async runtime, so we trust TcpStream)
+    let gateway_reachable = if port_listening {
+        // try a quick HTTP check via std; fallback to port_listening result
+        use std::io::{Read, Write};
+        let mut stream = TcpStream::connect_timeout(
+            &"127.0.0.1:18789".parse().unwrap(),
+            Duration::from_secs(2)
+        );
+        if let Ok(ref mut s) = stream {
+            let _ = s.write_all(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
+            let mut buf = [0u8; 16];
+            let _ = s.read(&mut buf);
+            // any response means gateway is up
+            String::from_utf8_lossy(&buf).starts_with("HTTP")
+        } else {
+            true // port is listening, assume reachable
+        }
+    } else {
+        false
+    };
+
+    // 3. Plugin paths
+    let config_path = get_config_path();
+    let plugin_paths_ok = if let Ok(content) = fs::read_to_string(&config_path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+            let entries = v["plugins"]["entries"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            entries
+                .iter()
+                .map(|(name, val)| {
+                    let enabled = val["enabled"].as_bool().unwrap_or(true);
+                    let exists = val["path"].as_str().map(|p| {
+                        let expanded = if p.starts_with("~/") {
+                            let home = env::var("HOME").unwrap_or_default();
+                            format!("{}{}", home, &p[1..])
+                        } else {
+                            p.to_string()
+                        };
+                        Path::new(&expanded).exists()
+                    });
+                    PluginPathStatus {
+                        name: name.clone(),
+                        enabled,
+                        exists,
+                    }
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    // 4. LaunchAgent
+    let launch_agent_loaded = std::process::Command::new("launchctl")
+        .args(["list"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("openclaw"))
+        .unwrap_or(false);
+
+    // 5. Recent errors
+    let log_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".openclaw/logs/gateway.err.log");
+    let recent_errors: Vec<String> = if let Ok(content) = fs::read_to_string(&log_path) {
+        content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .rev()
+            .take(5)
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let checked_at = chrono::Local::now().format("%H:%M:%S").to_string();
+
+    Ok(HealthReport {
+        gateway_reachable,
+        port_listening,
+        plugin_paths_ok,
+        launch_agent_loaded,
+        recent_errors,
+        checked_at,
+    })
 }
 
 // ── Commands ──────────────────────────────────────────────
@@ -332,6 +459,7 @@ pub fn run() {
             llm_fix,
             open_settings,
             open_dashboard,
+            health_check,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
